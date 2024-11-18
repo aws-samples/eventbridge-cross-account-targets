@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Destination SAM template for cross account EventBridge sample
+
+Parameters:
+  SourceAccountId:
+    Type: String
+    Description: Source Account Id
+  SnsSubscriptionEmail:
+    Type: String
+
+Resources:
+  #SQS Queue target
+  TargetSqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsDataKeyReusePeriodSeconds: 43200
+
+  # Allows EventBridge to send messages to SQS queue
+  EventBridgeToNewQueueSourceAccountPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref TargetSqsQueue
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "SQS:SendMessage"
+            Effect: "Allow"
+            Resource: !GetAtt TargetSqsQueue.Arn
+            Principal:
+              AWS: !Ref SourceAccountId
+
+  # Lambda function target
+  TargetLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs20.x
+      InlineCode: |
+        exports.handler = async(event, context) => {
+          console.log('Incoming event:', JSON.stringify(event, null, 4));
+        }
+
+  # Allows EventBridge to send messages to Lambda function
+  TargetLambdaFunctionAccessPolicy:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref TargetLambdaFunction
+      Principal: !Ref SourceAccountId
+
+  # SNS Topic target
+  TargetSnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: !Ref SnsSubscriptionEmail
+          Protocol: email
+
+  TargetSnsTopicAccessPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref TargetSnsTopic
+      PolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Action: "sns:Publish"
+            Resource: !Ref TargetSnsTopic
+            Principal:
+              AWS: !Ref SourceAccountId
+
+Outputs:
+  TargetSqsQueueArn:
+    Value: !GetAtt TargetSqsQueue.Arn
+  TargetLambdaFunctionArn:
+    Value: !GetAtt TargetLambdaFunction.Arn
+  TargetSnsTopicArn:
+    Value: !Ref TargetSnsTopic

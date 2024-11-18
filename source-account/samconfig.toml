@@ -1,0 +1,8 @@
+version=0.1
+
+[default.deploy.parameters]
+parameter_overrides = """
+    TargetSqsQueueArn=SQS_ARN
+    TargetSnsTopicArn=SNS_TOPIC_ARN
+    TargetLambdaFunctionArn=LAMBDA_ARN
+    """

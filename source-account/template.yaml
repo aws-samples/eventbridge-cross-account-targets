@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Source SAM template for cross account EventBridge sample
+
+Parameters:
+  TargetSqsQueueArn:
+    Type: String
+    Description: SQS Queue ARN from destination account
+  TargetLambdaFunctionArn:
+    Type: String
+    Description: Lambda function ARN from destination account
+  TargetSnsTopicArn:
+    Type: String
+    Description: SNS topic ARN from destination account
+
+Resources:
+  SourceEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: "SourceEventBus"
+
+  EventRuleTargetDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      SqsManagedSseEnabled: True
+
+  # Allow EventBridge to send messages to SQS queue
+  EventBridgeToDlqSqsPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - Ref: EventRuleTargetDLQ
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: SQS:SendMessage
+            Resource:
+              - !GetAtt EventRuleTargetDLQ.Arn
+
+  DestinationAccountTargetRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: DestinationAccountTargetRule
+      EventBusName: "SourceEventBus"
+      EventPattern:
+        source:
+          - "demo.sqs"
+        detail-type:
+          - "TestEvent"
+      Targets:
+        - Id: TargetSqsQueue
+          Arn: !Ref TargetSqsQueueArn
+          RoleArn: !GetAtt EventBridgeToTargetRole.Arn
+          DeadLetterConfig:
+            Arn: !GetAtt EventRuleTargetDLQ.Arn
+        - Id: TargetLambdaFunction
+          Arn: !Ref TargetLambdaFunctionArn
+          RoleArn: !GetAtt EventBridgeToTargetRole.Arn
+          DeadLetterConfig:
+            Arn: !GetAtt EventRuleTargetDLQ.Arn
+        - Id: TargetSnsTopic
+          Arn: !Ref TargetSnsTopicArn
+          RoleArn: !GetAtt EventBridgeToTargetRole.Arn
+          DeadLetterConfig:
+            Arn: !GetAtt EventRuleTargetDLQ.Arn
+
+  EventBridgeToTargetRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub events.amazonaws.com
+            Action: "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: SendMessagedToDestinationSQSQueue
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: "sqs:SendMessage"
+                Resource: !Ref TargetSqsQueueArn
+              - Effect: Allow
+                Action: "lambda:InvokeFunction"
+                Resource: !Ref TargetLambdaFunctionArn
+              - Effect: Allow
+                Action: "sns:Publish"
+                Resource: !Ref TargetSnsTopicArn
